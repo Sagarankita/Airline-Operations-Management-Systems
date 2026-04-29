@@ -262,8 +262,8 @@ const update = async (req, res, next) => {
 
 const updateStatus = async (req, res, next) => {
   try {
-    const { id }     = req.params;
-    const { status } = req.body;
+    const { id }          = req.params;
+    const { status, force } = req.body;
 
     if (status === 'Terminated' || status === 'Inactive') {
       const { rows: conflicts } = await pool.query(
@@ -274,9 +274,20 @@ const updateStatus = async (req, res, next) => {
         [id]
       );
       if (conflicts.length) {
-        return next(AppError.conflict(
-          'Cannot deactivate employee with upcoming flight assignments — reassign first'
-        ));
+        if (force) {
+          await pool.query(
+            `DELETE FROM crew_assignment
+             WHERE emp_id = $1
+               AND flight_id IN (
+                 SELECT f.flight_id FROM flight f WHERE f.departure_time > NOW()
+               )`,
+            [id]
+          );
+        } else {
+          return next(AppError.conflict(
+            'Employee has upcoming flight assignments. Check "Force update" to auto-unassign and proceed.'
+          ));
+        }
       }
     }
 
