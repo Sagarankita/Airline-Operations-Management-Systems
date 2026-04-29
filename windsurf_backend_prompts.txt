@@ -1,0 +1,134 @@
+WINDSURF BACKEND + DATABASE PROMPTS (NODE + EXPRESS + POSTGRES)
+
+Use these prompts in sequence. Keep implementation aligned with my frontend and with Lab 03 RAD + Lab 07 modeling decisions. Build production-ready APIs and database (no mock data in final flows).
+
+Target paths:
+- Frontend path: /Users/ankitasagar/Downloads/Modern Login Screen Design
+- Backend path: /Users/ankitasagar/Downloads/Modern Login Screen Design/backend
+- Keep all DB migrations/seeds/scripts inside backend path
+
+Current progress status (important):
+- Prompt 1 is already completed.
+- Prompt 2 is partially completed.
+- Continue from existing implementation, do not recreate already-finished foundation work.
+
+Global compliance rules for all prompts (derived from Lab 03 + Lab 07):
+1) Match actor/role model: Passenger, Admin, Pilot, Cabin Crew, Ground Staff, Maintenance Engineer, Fuel Staff.
+2) Preserve normalized relational design with referential integrity and auditable soft-delete where domain requires retention.
+3) Follow defined state behavior:
+   - Flight state machine: Scheduled -> Boarding -> Departed -> En Route -> Landed; Delayed branch from active states; Cancelled allowed from Scheduled/Boarding.
+   - Aircraft state machine: Active <-> Under_Maintenance, and Decommissioned terminal state.
+   - Passenger boarding status per flight: Pending -> Boarded, with Not-Boarded alert path on window expiry.
+4) Enforce role consistency and subtype consistency for employee hierarchy (Employee parent with Pilot/Cabin Crew/Ground Staff/Maintenance/Fuel role-specific behavior).
+5) Respect non-functional constraints from RAD:
+   - API response time target <= 3s for standard operations, <= 2s for real-time status propagation where applicable.
+   - Design for 200 concurrent users baseline.
+   - Clear RBAC, audit logging for sensitive actions, secure secrets handling, and HTTPS-ready deployment configuration.
+6) Maintain API contract quality: pagination, filtering, sorting, validation errors, conflict errors, and predictable response envelope.
+
+PROMPT 1 — Project Foundation + DB Design (COMPLETED)
+Use this as baseline already done. Only refine if any conflict appears with Lab 03/Lab 07 requirements; avoid unnecessary rework.
+
+PROMPT 2 — Master Data + Employee Domain (CONTINUE FROM PARTIAL)
+Complete and correct the partially implemented module for airports, aircraft, and employees.
+Required behavior:
+1) full CRUD + list APIs for airport, aircraft, employee; include pagination/sort/filter/search in all list APIs
+2) enforce employee role consistency with subtype details (pilot/cabin crew/ground staff) and reject invalid role-subtype combinations
+3) enforce base airport validation against airport master for relevant crew profiles
+4) apply soft-active lifecycle for employee/aircraft where deactivation is required instead of hard delete
+5) prevent duplicates for passport/license/contact and other identity-critical fields
+6) return API contracts optimized for existing admin frontend pages with minimal frontend refactor
+7) include admin-facing filters matching use cases: role, status, department, base airport, search by name/id/contact
+
+PROMPT 3 — Flight + Schedule + Crew Assignment
+Implement flight scheduling and crew assignment aligned to UC-08 and UC-09 behavior.
+Required behavior:
+1) create/update/cancel flight schedules with source/destination and timing validation
+2) detect aircraft conflicts (overlaps, maintenance status incompatibility)
+3) enforce flight status model with valid transitions only (Lab 07 state machine)
+4) crew assignment must check role fit, availability overlap, and eligibility/certification constraints
+5) expose endpoints for admin scheduling dashboard and crew assigned-flights view
+6) include clear conflict reason responses for invalid scheduling or assignment attempts
+
+PROMPT 4 — Crew Operations: Assigned Flights + Status + Duty Logs
+Implement UC-12, UC-13, UC-14 aligned APIs.
+Required behavior:
+1) assigned flights retrieval for pilot/cabin crew sorted by upcoming departure
+2) update flight status endpoint with transition guard and timestamped audit trail
+3) duty log create/view endpoints with automated duty duration calculation and invalid time-range rejection
+4) enforce business rules: only assigned crew can update status/log duty; duty log tied to completed or valid workflow stage per requirement
+5) provide admin summaries for crew utilization and duty compliance indicators
+6) include date-range filters and high-quality validation messages
+
+DONE PROMPT 5 — Passenger + Reservation + Feedback
+Implement UC-01 to UC-07 style passenger flows.
+Required behavior:
+1) passenger profile create/view/update/deactivate with audit-safe lifecycle
+2) reservation create/list/update-status with seat conflict prevention per flight
+3) support reservation states needed for boarding/cancellation/reschedule-ready workflow
+4) feedback submit/view with one-passenger-per-flight rule and rating range enforcement
+5) ensure passenger-only history endpoints and admin analytics endpoints both exist
+6) keep payloads compatible with existing passenger dashboard/profile/feedback UI
+
+DONE PROMPT 6 — Ground Staff + Boarding + Manifest
+Implement UC-15 and UC-16 behavior.
+Required behavior:
+1) manifest retrieval by flight with passenger details + seat + boarding status
+2) boarding confirmation updates reflected in near real-time
+3) boarding window logic with not-boarded alert workflow
+4) support list/search/filter for large manifests
+5) enforce access scope for ground staff and operational integrity checks
+6) ensure output contracts are ready for ground-staff frontend screens
+
+DONE PROMPT 7 — Maintenance + Fuel + Ops Logs
+Implement UC-17, UC-18, UC-19 aligned modules.
+Required behavior:
+1) maintenance record create/list/history with aircraft existence and responsible staff validation
+2) maintenance filters (date range/type/aircraft) and reverse-chronological retrieval
+3) fuel log create/list with aircraft-flight consistency checks and quantity validation
+4) maintain auditable log retention behavior consistent with aggregate/composition constraints from Lab 07
+5) support scheduled, unscheduled, and emergency maintenance categories
+6) provide reporting-ready outputs for admin review and trend analysis
+
+DONE PROMPT 8 — Reporting + Delay Prediction + Cross-Module Analytics
+Implement admin reporting and predictive endpoints aligned to UC-10 and reporting requirements.
+Required behavior:
+1) delay prediction endpoint with risk percentage, risk level, and contributing factors
+2) reporting APIs for flight operations, delays, fuel consumption, maintenance trends, staff utilization, and passenger feedback
+3) date-range and dimension filters for all analytics endpoints
+4) response format suitable for chart/dashboard rendering in existing frontend
+5) query/index tuning for performance targets
+6) include clear assumptions and fallback behavior when prediction inputs are incomplete
+
+PROMPT 9 — Frontend Integration Pass (NO AUTH YET)
+Integrate all backend modules with current frontend routes and portal dashboards.
+Required behavior:
+1) replace static/mock data with live API data module-by-module
+2) preserve existing UI patterns and navigation behavior
+3) add loading/empty/error states with user-friendly messages
+4) close endpoint-contract gaps discovered during integration
+5) verify end-to-end workflow per actor role without authentication layer yet
+6) produce integration checklist mapped to use cases
+
+PROMPT 10 — Authentication + Authorization (LAST)
+Implement authentication only after all business modules are integrated.
+Required behavior:
+1) role-based authentication matching all AOMS actor roles
+2) secure login/logout/session or token flow with refresh strategy
+3) authorization middleware enforcing least privilege per route/module
+4) password hashing, lockout/rate-limit policy, and authentication audit logs
+5) route protection + role-based frontend navigation guard
+6) secure default bootstrap users for testing in non-production environments
+
+PROMPT 11 — Final Hardening + Handover
+Perform final system quality and deployment readiness pass.
+Required behavior:
+1) API contract consistency review across all modules
+2) schema/index optimization and query performance validation
+3) data integrity test coverage for critical workflows and state transitions
+4) operational error scenario matrix and graceful failure handling review
+5) deployment runbook, environment checklist, backup/recovery notes, and observability checklist
+6) concise maintainer handover with known limitations and future enhancements
+
+Final outcome target:
+A fully working website behaviorally aligned with the existing frontend and consistent with Lab 03 RAD + Lab 07 object/state specifications.

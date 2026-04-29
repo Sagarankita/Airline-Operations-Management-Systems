@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
+import { LoadingState, ErrorState } from "../../shared/ApiStates";
+import { useFetch } from "../../../../lib/useApi";
 import {
   Home,
   Users,
@@ -12,6 +15,7 @@ import {
 
 export default function AdminDelayPrediction() {
   const userName = sessionStorage.getItem("userEmail")?.split("@")[0] || "Admin";
+  const [selectedFlightId, setSelectedFlightId] = useState<string>("");
 
   const navItems = [
     { label: "Dashboard", path: "/admin", icon: <Home className="w-5 h-5" /> },
@@ -23,16 +27,17 @@ export default function AdminDelayPrediction() {
     { label: "Reports", path: "/admin/reports", icon: <FileText className="w-5 h-5" /> },
   ];
 
-  const delayRisk = 72; // percentage
-  const riskLevel = delayRisk >= 70 ? "High" : delayRisk >= 40 ? "Medium" : "Low";
-  const riskColor = delayRisk >= 70 ? "#E74C3C" : delayRisk >= 40 ? "#F39C12" : "#27AE60";
+  const { data: flightsData } = useFetch<any[]>('/flights?limit=50');
+  const flights: any[] = flightsData ?? [];
 
-  const contributingFactors = [
-    "Weather conditions at destination (Heavy rain forecast)",
-    "High air traffic congestion at LHR",
-    "Potential crew availability issues",
-    "Aircraft maintenance scheduled close to departure",
-  ];
+  const { data: prediction, loading, error, refetch } = useFetch<any>(
+    selectedFlightId ? `/reports/delay-prediction/${selectedFlightId}` : null
+  );
+
+  const delayRisk = prediction?.risk_percent ?? 0;
+  const riskLevel = prediction?.risk_level ?? '—';
+  const riskColor = delayRisk >= 70 ? "#E74C3C" : delayRisk >= 40 ? "#F39C12" : "#27AE60";
+  const contributingFactors: string[] = prediction?.contributing_factors ?? [];
 
   return (
     <DashboardLayout role="Administrator" userName={userName} navItems={navItems}>
@@ -42,31 +47,41 @@ export default function AdminDelayPrediction() {
         Delay Prediction
       </h1>
 
-      {/* Flight Info Card */}
+      {/* Flight Selector */}
       <div className="bg-white p-6 shadow-sm mb-6" style={{ borderRadius: "8px" }}>
-        <h2 className="text-lg mb-3" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-          Flight Information
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Flight No:</span>
-            <p style={{ color: "#1B2A4A", fontWeight: 500 }}>AO101</p>
+        <h2 className="text-lg mb-3" style={{ color: "#1B2A4A", fontWeight: 600 }}>Select Flight</h2>
+        <select
+          value={selectedFlightId}
+          onChange={e => setSelectedFlightId(e.target.value)}
+          className="w-full max-w-md px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
+          style={{ borderRadius: "8px" }}
+        >
+          <option value="">Choose a flight...</option>
+          {flights.map((f: any) => (
+            <option key={f.flight_id} value={f.flight_id}>
+              #{f.flight_id} — {f.source_airport_code} → {f.dest_airport_code} ({f.departure_time ? new Date(f.departure_time).toLocaleDateString() : ''})
+            </option>
+          ))}
+        </select>
+        {prediction && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4">
+            <div><span className="text-gray-600">Flight ID:</span><p style={{ color: "#1B2A4A", fontWeight: 500 }}>#{prediction.flight_id}</p></div>
+            <div><span className="text-gray-600">Route:</span><p style={{ color: "#1B2A4A", fontWeight: 500 }}>{prediction.source_airport_code} → {prediction.dest_airport_code}</p></div>
+            <div><span className="text-gray-600">Departure:</span><p style={{ color: "#1B2A4A", fontWeight: 500 }}>{prediction.departure_time ? new Date(prediction.departure_time).toLocaleString() : '—'}</p></div>
+            <div><span className="text-gray-600">Aircraft:</span><p style={{ color: "#1B2A4A", fontWeight: 500 }}>{prediction.aircraft_model ?? prediction.aircraft_id}</p></div>
           </div>
-          <div>
-            <span className="text-gray-600">Route:</span>
-            <p style={{ color: "#1B2A4A", fontWeight: 500 }}>JFK → LHR</p>
-          </div>
-          <div>
-            <span className="text-gray-600">Scheduled Departure:</span>
-            <p style={{ color: "#1B2A4A", fontWeight: 500 }}>2026-04-06 08:00</p>
-          </div>
-          <div>
-            <span className="text-gray-600">Aircraft:</span>
-            <p style={{ color: "#1B2A4A", fontWeight: 500 }}>B777-300</p>
-          </div>
-        </div>
+        )}
       </div>
 
+      {!selectedFlightId && (
+        <div className="bg-white p-8 shadow-sm text-center text-gray-500" style={{ borderRadius: "8px" }}>
+          Select a flight above to run the delay risk assessment.
+        </div>
+      )}
+      {loading && <LoadingState message="Calculating delay risk..." />}
+      {error   && <ErrorState message={error} onRetry={refetch} />}
+
+      {prediction && !loading && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Delay Risk Gauge */}
         <div className="bg-white p-8 shadow-sm" style={{ borderRadius: "8px" }}>
@@ -139,8 +154,10 @@ export default function AdminDelayPrediction() {
           </ul>
         </div>
       </div>
+      )}
 
       {/* Action Buttons */}
+      {prediction && !loading && (
       <div className="bg-white p-6 shadow-sm" style={{ borderRadius: "8px" }}>
         <h2 className="text-lg mb-4" style={{ color: "#1B2A4A", fontWeight: 600 }}>
           Recommended Actions
@@ -165,6 +182,7 @@ export default function AdminDelayPrediction() {
           </button>
         </div>
       </div>
+      )}
     </DashboardLayout>
   );
 }

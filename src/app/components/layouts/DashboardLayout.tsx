@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { LogOut, User } from "lucide-react";
+import { useUserName } from "../../../lib/useUserName";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -9,9 +10,10 @@ interface DashboardLayoutProps {
   navItems: { label: string; path: string; icon: ReactNode }[];
 }
 
-export function DashboardLayout({ children, role, userName, navItems }: DashboardLayoutProps) {
+export function DashboardLayout({ children, role, userName: fallback, navItems }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const userName = useUserName(fallback);
 
   const handleLogout = () => {
     sessionStorage.clear();

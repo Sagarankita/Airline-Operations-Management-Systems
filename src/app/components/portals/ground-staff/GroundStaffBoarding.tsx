@@ -2,12 +2,31 @@ import { useState } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
 import { StatusBadge } from "../../shared/StatusBadge";
+import { LoadingState, ErrorState, EmptyState } from "../../shared/ApiStates";
+import { api } from "../../../../lib/api";
+import { useFetch } from "../../../../lib/useApi";
 import { Home, Users, AlertTriangle, Search } from "lucide-react";
 
 export default function GroundStaffBoarding() {
   const userName = sessionStorage.getItem("userEmail")?.split("@")[0] || "Staff";
   const [searchTerm, setSearchTerm] = useState("");
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [selectedFlightId, setSelectedFlightId] = useState<string>("");
+  const [checkingIn, setCheckingIn] = useState<number | null>(null);
+  const [closing, setClosing] = useState(false);
+
+  const { data: flightsData } = useFetch<any[]>('/flights?limit=50');
+  const allFlights: any[] = flightsData ?? [];
+  const flights = allFlights.filter(f => f.status === 'Scheduled' || f.status === 'Boarding');
+
+  const { data: manifestData, loading, error, refetch } = useFetch<any[]>(
+    selectedFlightId ? `/boarding/${selectedFlightId}/manifest?limit=100` : null
+  );
+  const passengers: any[] = manifestData ?? [];
+
+  const { data: boardingStatus, refetch: refetchStatus } = useFetch<any>(
+    selectedFlightId ? `/boarding/${selectedFlightId}/status` : null
+  );
 
   const navItems = [
     { label: "Dashboard", path: "/ground-staff", icon: <Home className="w-5 h-5" /> },
@@ -15,31 +34,49 @@ export default function GroundStaffBoarding() {
     { label: "Active Boarding", path: "/ground-staff/boarding", icon: <AlertTriangle className="w-5 h-5" /> },
   ];
 
-  const passengers = [
-    { name: "John Anderson", nationalId: "P1234567890", seat: "12A", status: "Boarded" },
-    { name: "Sarah Johnson", nationalId: "P2345678901", seat: "12B", status: "Pending" },
-    { name: "Michael Chen", nationalId: "P3456789012", seat: "15C", status: "Boarded" },
-    { name: "Emma Williams", nationalId: "P4567890123", seat: "18D", status: "Pending" },
-    { name: "James Brown", nationalId: "P5678901234", seat: "22E", status: "Alert" },
-    { name: "Lisa Anderson", nationalId: "P6789012345", seat: "25F", status: "Boarded" },
-  ];
-
-  const filteredPassengers = passengers.filter(p =>
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.seat.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredPassengers = passengers.filter((p: any) =>
+    (p.passenger_name ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.passport_no ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.seat_no ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const boardedCount = passengers.filter(p => p.status === "Boarded").length;
-  const totalCount = passengers.length;
-  const unboardedPassengers = passengers.filter(p => p.status === "Pending" || p.status === "Alert");
-
-  const handleCloseBoardingAttempt = () => {
-    if (unboardedPassengers.length > 0) {
-      setShowAlertModal(true);
-    } else {
-      alert("Boarding closed successfully!");
+  const handleCheckIn = async (pnrId: number) => {
+    setCheckingIn(pnrId);
+    try {
+      await api.patch(`/boarding/${selectedFlightId}/check-in/${pnrId}`);
+      refetch(); refetchStatus();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setCheckingIn(null);
     }
   };
+
+  const handleCloseBoarding = async () => {
+    const unboarded = passengers.filter((p: any) => p.boarding_status !== 'Checked_In' && p.boarding_status !== 'Completed');
+    if (unboarded.length > 0) {
+      setShowAlertModal(true);
+      return;
+    }
+    await doCloseBoarding();
+  };
+
+  const doCloseBoarding = async () => {
+    setClosing(true);
+    try {
+      await api.post(`/boarding/${selectedFlightId}/close`, {});
+      setShowAlertModal(false);
+      refetch(); refetchStatus();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  const boardedCount = passengers.filter(p => p.boarding_status === 'Checked_In' || p.boarding_status === 'Completed').length;
+  const totalCount = passengers.length;
+  const unboardedPassengers = passengers.filter(p => p.boarding_status !== 'Checked_In' && p.boarding_status !== 'Completed');
 
   return (
     <DashboardLayout role="Ground Staff" userName={userName} navItems={navItems}>
@@ -47,27 +84,48 @@ export default function GroundStaffBoarding() {
         items={[{ label: "Dashboard", href: "/ground-staff" }, { label: "Active Boarding" }]}
       />
       
-      {/* Flight Header Bar */}
+      <h1 className="text-3xl mb-6" style={{ color: "#1B2A4A", fontWeight: 600 }}>
+        Boarding Management
+      </h1>
+
+      {/* Flight Selector */}
       <div className="bg-white p-6 shadow-sm mb-6" style={{ borderRadius: "8px" }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl mb-1" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-              Flight AO101: JFK → LHR
-            </h1>
-            <p className="text-sm text-gray-600">Boarding Gate A12 | Departure: 08:00</p>
-          </div>
-          <div className="text-right">
-            <p className="text-3xl" style={{ color: "#2E86DE", fontWeight: 700 }}>
-              {boardedCount}/{totalCount}
+        <h2 className="text-lg mb-3" style={{ color: "#1B2A4A", fontWeight: 600 }}>Select Flight</h2>
+        <select
+          value={selectedFlightId}
+          onChange={e => setSelectedFlightId(e.target.value)}
+          className="w-full max-w-md px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
+          style={{ borderRadius: "8px" }}
+        >
+          <option value="">Choose a flight...</option>
+          {flights.map((f: any) => (
+            <option key={f.flight_id} value={f.flight_id}>
+              #{f.flight_id} — {f.source_airport_code} → {f.dest_airport_code} | Dep: {new Date(f.departure_time).toLocaleDateString()} | {f.status}
+            </option>
+          ))}
+        </select>
+        {boardingStatus && selectedFlightId && (
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-sm text-gray-600">Status: <strong>{boardingStatus.flight_status ?? '—'}</strong> {boardingStatus.boarding_open ? '• Boarding Open' : ''}</p>
+            <p className="text-2xl" style={{ color: "#1B2A4A", fontWeight: 600 }}>
+              {boardingStatus.boarded ?? 0} / {boardingStatus.total_booked ?? passengers.length} Boarded ({boardingStatus.boarding_pct ?? 0}%)
             </p>
-            <p className="text-sm text-gray-600">Passengers Boarded</p>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Search */}
-      <div className="mb-6">
-        <div className="relative max-w-md">
+      {!selectedFlightId && (
+        <div className="bg-white p-8 shadow-sm text-center text-gray-500" style={{ borderRadius: "8px" }}>
+          Select a flight above to manage boarding.
+        </div>
+      )}
+      {loading && <LoadingState message="Loading manifest..." />}
+      {error   && <ErrorState message={error} onRetry={refetch} />}
+
+      {/* Search + Close Boarding */}
+      {selectedFlightId && !loading && !error && (
+      <div className="flex items-center gap-4 mb-6">
+        <div className="relative flex-1 max-w-md">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
@@ -78,44 +136,70 @@ export default function GroundStaffBoarding() {
             style={{ borderRadius: "8px" }}
           />
         </div>
+        <button
+          onClick={handleCloseBoarding}
+          disabled={closing}
+          className="px-6 py-3 rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: "#E74C3C" }}
+        >
+          {closing ? 'Closing...' : 'Close Boarding'}
+        </button>
       </div>
+      )}
 
-      {/* Boarding List */}
-      <div className="space-y-3 mb-24">
-        {filteredPassengers.map((passenger, index) => (
-          <div
-            key={index}
-            className="bg-white p-4 shadow-sm flex items-center justify-between"
-            style={{ borderRadius: "8px" }}
-          >
-            <div className="flex-1">
-              <p style={{ color: "#1B2A4A", fontWeight: 600 }}>{passenger.name}</p>
-              <p className="text-sm text-gray-600">
-                Seat {passenger.seat} • {passenger.nationalId}
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <StatusBadge status={passenger.status} />
-              {passenger.status === "Pending" && (
-                <button
-                  className="px-4 py-2 rounded-lg text-white transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "#27AE60" }}
-                >
-                  Confirm Boarding
-                </button>
-              )}
-              {passenger.status === "Alert" && (
-                <button
-                  className="px-4 py-2 rounded-lg text-white transition-colors hover:opacity-90"
-                  style={{ backgroundColor: "#E74C3C" }}
-                >
-                  Contact Passenger
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+      {/* Passenger Table */}
+      {selectedFlightId && !loading && !error && (
+      <div className="bg-white shadow-sm overflow-hidden mb-24" style={{ borderRadius: "8px" }}>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead style={{ backgroundColor: "#F9FAFB" }}>
+              <tr>
+                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Name</th>
+                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Passport / ID</th>
+                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Seat</th>
+                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Status</th>
+                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPassengers.length === 0 ? (
+                <tr><td colSpan={5}><EmptyState message="No passengers found." /></td></tr>
+              ) : filteredPassengers.map((passenger: any, index: number) => (
+                <tr key={passenger.pnr_id ?? index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                  <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A", fontWeight: 500 }}>
+                    {passenger.passenger_name ?? '—'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {passenger.passport_no ?? '—'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {passenger.seat_no ?? '—'}
+                  </td>
+                  <td className="px-6 py-4">
+                    <StatusBadge status={passenger.boarding_status ?? 'Confirmed'} variant="small" />
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    {passenger.boarding_status === 'Checked_In' || passenger.boarding_status === 'Completed' ? (
+                      <span className="text-green-600">Checked In</span>
+                    ) : passenger.boarding_status === 'No_Show' ? (
+                      <span className="text-red-500">No Show</span>
+                    ) : (
+                      <button
+                        onClick={() => handleCheckIn(passenger.pnr_id)}
+                        disabled={checkingIn === passenger.pnr_id}
+                        className="text-[#2E86DE] hover:underline disabled:opacity-50"
+                      >
+                        {checkingIn === passenger.pnr_id ? 'Processing...' : 'Check In'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+      )}
 
       {/* Sticky Bottom Bar */}
       <div className="fixed bottom-0 left-64 right-0 bg-white border-t border-gray-200 p-4 shadow-lg">
@@ -125,13 +209,6 @@ export default function GroundStaffBoarding() {
               <strong>{boardedCount}</strong> of <strong>{totalCount}</strong> passengers boarded
             </p>
           </div>
-          <button
-            onClick={handleCloseBoardingAttempt}
-            className="px-6 py-3 rounded-lg text-white transition-colors hover:opacity-90"
-            style={{ backgroundColor: "#E74C3C" }}
-          >
-            Close Boarding
-          </button>
         </div>
       </div>
 
@@ -159,13 +236,13 @@ export default function GroundStaffBoarding() {
                     className="bg-white p-4 rounded-lg flex items-center justify-between"
                   >
                     <div>
-                      <p style={{ color: "#1B2A4A", fontWeight: 600 }}>{passenger.name}</p>
+                      <p style={{ color: "#1B2A4A", fontWeight: 600 }}>{passenger.passenger_name}</p>
                       <p className="text-sm text-gray-600">
-                        Seat {passenger.seat} • {passenger.nationalId}
+                        Seat {passenger.seat_no} • {passenger.passport_no}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <StatusBadge status={passenger.status} variant="small" />
+                      <StatusBadge status={passenger.boarding_status} variant="small" />
                       <button
                         className="px-3 py-1 rounded text-sm text-white transition-colors hover:opacity-90"
                         style={{ backgroundColor: "#2E86DE" }}
@@ -181,19 +258,17 @@ export default function GroundStaffBoarding() {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowAlertModal(false)}
-                className="flex-1 px-4 py-3 rounded-lg border border-gray-300 text-gray-700 transition-colors hover:bg-gray-50"
+                className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700"
               >
-                Continue Boarding
+                Cancel
               </button>
               <button
-                onClick={() => {
-                  setShowAlertModal(false);
-                  alert("Boarding closed with outstanding passengers noted.");
-                }}
-                className="flex-1 px-4 py-3 rounded-lg text-white transition-colors hover:opacity-90"
+                onClick={doCloseBoarding}
+                disabled={closing}
+                className="flex-1 px-4 py-2 rounded-lg text-white hover:opacity-90 disabled:opacity-50"
                 style={{ backgroundColor: "#E74C3C" }}
               >
-                Force Close Boarding
+                {closing ? 'Closing...' : 'Close Boarding Anyway'}
               </button>
             </div>
           </div>

@@ -1,33 +1,56 @@
 import { useState } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
+import { api } from "../../../../lib/api";
+import { useFetch } from "../../../../lib/useApi";
+import { session } from "../../../../lib/session";
 import { Home, Fuel } from "lucide-react";
 
 export default function FuelStaffLog() {
   const userName = sessionStorage.getItem("userEmail")?.split("@")[0] || "Fuel Staff";
-  const [selectedFuelType, setSelectedFuelType] = useState("Jet-A1");
   const [formData, setFormData] = useState({
-    aircraftReg: "",
-    flight: "",
-    quantity: "",
-    dateTime: "",
-    supplierRef: "",
+    aircraft_id: "",
+    flight_id: "",
+    fuel_loaded: "",
+    fuel_date: "",
+    fuel_consumed: "",
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
+  const empId = session.getEmpId();
+  const { data: acData } = useFetch<any[]>('/aircraft?limit=100');
+  const aircraftList: any[] = acData ?? [];
+  const { data: flightsData } = useFetch<any[]>('/flights?limit=50');
+  const flights: any[] = flightsData ?? [];
 
   const navItems = [
     { label: "Dashboard", path: "/fuel-staff", icon: <Home className="w-5 h-5" /> },
     { label: "Record Fuel Log", path: "/fuel-staff/log", icon: <Fuel className="w-5 h-5" /> },
   ];
 
-  const fuelTypes = ["Jet-A1", "Avgas", "SAF"];
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert("Fuel log submitted successfully!");
+    setSubmitting(true); setSubmitMsg(null);
+    try {
+      await api.post('/fuel-logs', {
+        aircraft_id:   Number(formData.aircraft_id),
+        flight_id:     Number(formData.flight_id),
+        fuel_loaded:   parseFloat(formData.fuel_loaded),
+        fuel_consumed: formData.fuel_consumed ? parseFloat(formData.fuel_consumed) : undefined,
+        fuel_date:     formData.fuel_date || undefined,
+        emp_id:        empId || undefined,
+      });
+      setSubmitMsg('Fuel log submitted successfully!');
+      setFormData({ aircraft_id: '', flight_id: '', fuel_loaded: '', fuel_date: '', fuel_consumed: '' });
+    } catch (err: any) {
+      setSubmitMsg(`Error: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -49,19 +72,18 @@ export default function FuelStaffLog() {
                   Aircraft Registration
                 </label>
                 <select
-                  id="aircraftReg"
-                  name="aircraftReg"
-                  value={formData.aircraftReg}
+                  id="aircraft_id"
+                  name="aircraft_id"
+                  value={formData.aircraft_id}
                   onChange={handleChange}
                   className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
                   style={{ borderRadius: "8px" }}
                   required
                 >
                   <option value="">Select aircraft...</option>
-                  <option value="N12345">N12345 - B777-300</option>
-                  <option value="N67890">N67890 - A380-800</option>
-                  <option value="N24680">N24680 - B787-9</option>
-                  <option value="N13579">N13579 - A320-200</option>
+                  {aircraftList.map((ac: any) => (
+                    <option key={ac.aircraft_id} value={ac.aircraft_id}>{ac.model} (#{ac.aircraft_id})</option>
+                  ))}
                 </select>
               </div>
 
@@ -70,104 +92,90 @@ export default function FuelStaffLog() {
                   Flight
                 </label>
                 <select
-                  id="flight"
-                  name="flight"
-                  value={formData.flight}
+                  id="flight_id"
+                  name="flight_id"
+                  value={formData.flight_id}
                   onChange={handleChange}
                   className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
                   style={{ borderRadius: "8px" }}
                   required
                 >
                   <option value="">Select flight...</option>
-                  <option value="AO101">AO101 - JFK to LHR</option>
-                  <option value="AO202">AO202 - LHR to CDG</option>
-                  <option value="AO303">AO303 - CDG to DXB</option>
+                  {flights.map((f: any) => (
+                    <option key={f.flight_id} value={f.flight_id}>
+                      #{f.flight_id} — {f.source_airport_code} → {f.dest_airport_code}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                Fuel Type
-              </label>
-              <div className="flex bg-white border border-gray-300 rounded-lg overflow-hidden">
-                {fuelTypes.map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setSelectedFuelType(type)}
-                    className={`flex-1 px-6 py-3 transition-colors ${
-                      selectedFuelType === type
-                        ? "bg-[#2E86DE] text-white"
-                        : "text-gray-700 hover:bg-gray-50"
-                    }`}
-                    style={{ fontWeight: 500 }}
-                  >
-                    {type}
-                  </button>
-                ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label htmlFor="fuel_loaded" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                  Fuel Loaded (litres)
+                </label>
+                <input
+                  id="fuel_loaded"
+                  name="fuel_loaded"
+                  type="number"
+                  step="0.01"
+                  value={formData.fuel_loaded}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+                  style={{ borderRadius: "8px" }}
+                  placeholder="e.g., 45000"
+                  required
+                />
+              </div>
+
+              <div>
+                <label htmlFor="fuel_consumed" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                  Fuel Consumed (litres, optional)
+                </label>
+                <input
+                  id="fuel_consumed"
+                  name="fuel_consumed"
+                  type="number"
+                  step="0.01"
+                  value={formData.fuel_consumed}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+                  style={{ borderRadius: "8px" }}
+                  placeholder="e.g., 42000"
+                />
               </div>
             </div>
 
             <div>
-              <label htmlFor="quantity" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                Quantity in Litres
+              <label htmlFor="fuel_date" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                Fueling Date
               </label>
               <input
-                id="quantity"
-                name="quantity"
-                type="number"
-                step="0.1"
-                value={formData.quantity}
+                id="fuel_date"
+                name="fuel_date"
+                type="date"
+                value={formData.fuel_date}
                 onChange={handleChange}
                 className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
                 style={{ borderRadius: "8px" }}
-                placeholder="e.g., 50000"
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="dateTime" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                Date & Time
-              </label>
-              <input
-                id="dateTime"
-                name="dateTime"
-                type="datetime-local"
-                value={formData.dateTime}
-                onChange={handleChange}
-                className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
-                style={{ borderRadius: "8px" }}
-                required
-              />
-            </div>
-
-            <div>
-              <label htmlFor="supplierRef" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                Supplier Reference
-              </label>
-              <input
-                id="supplierRef"
-                name="supplierRef"
-                type="text"
-                value={formData.supplierRef}
-                onChange={handleChange}
-                className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
-                style={{ borderRadius: "8px" }}
-                placeholder="e.g., SUP-2026-001"
-                required
               />
             </div>
           </div>
         </div>
 
+        {submitMsg && (
+          <div className="mt-4 mb-4 px-4 py-3 rounded-lg text-sm" style={{ backgroundColor: submitMsg.startsWith('Error') ? '#FEE2E2' : '#D1FAE5', color: submitMsg.startsWith('Error') ? '#991B1B' : '#065F46' }}>
+            {submitMsg}
+          </div>
+        )}
         <button
           type="submit"
-          className="px-6 py-3 rounded-lg text-white transition-colors hover:opacity-90"
+          disabled={submitting}
+          className="px-6 py-3 rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-50"
           style={{ backgroundColor: "#27AE60" }}
         >
-          Submit Fuel Log
+          {submitting ? 'Submitting...' : 'Submit Fuel Log'}
         </button>
       </form>
     </DashboardLayout>

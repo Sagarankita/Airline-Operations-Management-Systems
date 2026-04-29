@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Loader2, Shield } from "lucide-react";
+import { session } from "../../lib/session";
 
 // Mock role assignment based on email patterns
 const getUserRole = (email: string): string => {
@@ -45,6 +46,7 @@ export default function RoleRoutingScreen() {
 
     setUserName(name);
     setUserRole(role);
+    session.setEntityIds(email);
 
     // Show spinner for 1 second
     const loadingTimer = setTimeout(() => {

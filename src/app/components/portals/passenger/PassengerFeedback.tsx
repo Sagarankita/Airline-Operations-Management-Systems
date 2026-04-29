@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
+import { LoadingState, ErrorState, EmptyState } from "../../shared/ApiStates";
+import { api } from "../../../../lib/api";
+import { useFetch } from "../../../../lib/useApi";
+import { session } from "../../../../lib/session";
 import { Home, User, MessageSquare, Star, Plus, ArrowUpDown } from "lucide-react";
 import { useNavigate } from "react-router";
 
@@ -14,6 +18,8 @@ export default function PassengerFeedback() {
     { label: "My Profile", path: "/passenger/profile", icon: <User className="w-5 h-5" /> },
     { label: "Feedback", path: "/passenger/feedback", icon: <MessageSquare className="w-5 h-5" /> },
   ];
+
+  const passengerId = session.getPassengerId();
 
   return (
     <DashboardLayout role="Passenger" userName={userName} navItems={navItems}>
@@ -49,21 +55,49 @@ export default function PassengerFeedback() {
         </button>
       </div>
 
-      {activeTab === "submit" ? <SubmitFeedbackForm /> : <FeedbackHistory />}
+      {activeTab === "submit" ? <SubmitFeedbackForm passengerId={passengerId} /> : <FeedbackHistory passengerId={passengerId} />}
     </DashboardLayout>
   );
 }
 
-function SubmitFeedbackForm() {
+const REVIEWABLE = new Set(['Departed', 'En_Route', 'Landed', 'Completed']);
+
+function SubmitFeedbackForm({ passengerId }: { passengerId: number }) {
   const [selectedFlight, setSelectedFlight] = useState("");
   const [rating, setRating] = useState(0);
   const [hoveredRating, setHoveredRating] = useState(0);
   const [comments, setComments] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const { data: reservationsData } = useFetch<any[]>(
+    passengerId ? `/passengers/${passengerId}/reservations?limit=100` : null
+  );
+  const eligibleFlights = (reservationsData ?? []).filter(
+    (r: any) =>
+      (r.reservation_status === 'Checked_In' || r.reservation_status === 'Completed') &&
+      REVIEWABLE.has(r.flight_status)
+  );
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Submit logic here
-    alert("Feedback submitted successfully!");
+    if (!rating) { setSubmitMsg('Please select a rating.'); return; }
+    if (!selectedFlight) { setSubmitMsg('Please select a flight.'); return; }
+    setSubmitting(true); setSubmitMsg(null);
+    try {
+      await api.post('/feedback', {
+        passenger_id: passengerId,
+        flight_id:    Number(selectedFlight),
+        rating,
+        comments,
+      });
+      setSubmitMsg('Feedback submitted successfully!');
+      setSelectedFlight(''); setRating(0); setComments('');
+    } catch (err: any) {
+      setSubmitMsg(`Error: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -73,8 +107,11 @@ function SubmitFeedbackForm() {
           {/* Flight Selector */}
           <div>
             <label htmlFor="flight" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-              Select Flight
+              Select Flight (flights you have travelled on)
             </label>
+            {eligibleFlights.length === 0 ? (
+              <p className="text-sm text-gray-500 italic">No eligible flights found. Feedback can only be submitted for flights you have boarded with Checked-In or Completed status.</p>
+            ) : (
             <select
               id="flight"
               value={selectedFlight}
@@ -84,10 +121,13 @@ function SubmitFeedbackForm() {
               required
             >
               <option value="">Choose a flight...</option>
-              <option value="AO101">AO101 - New York to London</option>
-              <option value="AO202">AO202 - London to Paris</option>
-              <option value="AO303">AO303 - Paris to Dubai</option>
+              {eligibleFlights.map((r: any) => (
+                <option key={r.pnr_id} value={r.flight_id}>
+                  #{r.flight_id} — {r.source_airport_code} → {r.dest_airport_code} ({r.flight_status})
+                </option>
+              ))}
             </select>
+            )}
           </div>
 
           {/* Star Rating */}
@@ -135,38 +175,28 @@ function SubmitFeedbackForm() {
         </div>
       </div>
 
+      {submitMsg && (
+        <div className="mt-4 px-4 py-3 rounded-lg text-sm" style={{ backgroundColor: submitMsg.startsWith('Error') ? '#FEE2E2' : '#D1FAE5', color: submitMsg.startsWith('Error') ? '#991B1B' : '#065F46' }}>
+          {submitMsg}
+        </div>
+      )}
       <button
         type="submit"
-        className="px-6 py-2 rounded-lg text-white transition-colors hover:opacity-90"
+        disabled={submitting}
+        className="px-6 py-2 rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-50"
         style={{ backgroundColor: "#2E86DE" }}
       >
-        Submit Feedback
+        {submitting ? 'Submitting...' : 'Submit Feedback'}
       </button>
     </form>
   );
 }
 
-function FeedbackHistory() {
-  const feedbackData = [
-    {
-      flight: "AO101",
-      date: "2026-03-15",
-      rating: 5,
-      comments: "Excellent service and on-time departure!",
-    },
-    {
-      flight: "AO202",
-      date: "2026-02-28",
-      rating: 4,
-      comments: "Good flight, but check-in took longer than expected.",
-    },
-    {
-      flight: "AO303",
-      date: "2026-01-10",
-      rating: 3,
-      comments: "Average experience. Food could be improved.",
-    },
-  ];
+function FeedbackHistory({ passengerId }: { passengerId: number }) {
+  const { data, loading, error, refetch } = useFetch<any[]>(
+    passengerId ? `/feedback/passenger/${passengerId}` : null
+  );
+  const feedbackData: any[] = data ?? [];
 
   return (
     <div className="bg-white shadow-sm overflow-hidden" style={{ borderRadius: "8px" }}>
@@ -195,16 +225,22 @@ function FeedbackHistory() {
             </tr>
           </thead>
           <tbody>
-            {feedbackData.map((feedback, index) => (
+            {loading ? (
+              <tr><td colSpan={4}><LoadingState message="Loading history..." /></td></tr>
+            ) : error ? (
+              <tr><td colSpan={4}><ErrorState message={error} onRetry={refetch} /></td></tr>
+            ) : feedbackData.length === 0 ? (
+              <tr><td colSpan={4}><EmptyState message="No feedback submitted yet." /></td></tr>
+            ) : feedbackData.map((feedback, index) => (
               <tr
-                key={index}
+                key={feedback.feedback_id ?? index}
                 className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}
               >
                 <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A" }}>
-                  {feedback.flight}
+                  #{feedback.flight_id ?? '—'}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {feedback.date}
+                  {feedback.created_at ? new Date(feedback.created_at).toLocaleDateString() : '—'}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex gap-1">

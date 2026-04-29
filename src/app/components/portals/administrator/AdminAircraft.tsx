@@ -2,6 +2,9 @@ import { useState } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
 import { StatusBadge } from "../../shared/StatusBadge";
+import { LoadingState, ErrorState, EmptyState } from "../../shared/ApiStates";
+import { api } from "../../../../lib/api";
+import { useFetch } from "../../../../lib/useApi";
 import {
   Home,
   Users,
@@ -24,9 +27,10 @@ export default function AdminAircraft() {
   const [selectedAircraft, setSelectedAircraft] = useState<any>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [formData, setFormData] = useState({
-    registration: "",
     model: "",
-    capacity: "",
+    manufacturer: "",
+    weight_capacity: "",
+    range_km: "",
     status: "Active",
   });
 
@@ -40,35 +44,28 @@ export default function AdminAircraft() {
     { label: "Reports", path: "/admin/reports", icon: <FileText className="w-5 h-5" /> },
   ];
 
-  const [aircraft, setAircraft] = useState([
-    { registration: "N12345", model: "Boeing 777-300", capacity: 396, status: "Active" },
-    { registration: "N67890", model: "Airbus A380-800", capacity: 525, status: "Active" },
-    { registration: "N24680", model: "Boeing 787-9", capacity: 296, status: "Maintenance" },
-    { registration: "N13579", model: "Airbus A320-200", capacity: 180, status: "Active" },
-    { registration: "N86420", model: "Boeing 737-800", capacity: 189, status: "Active" },
-  ]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
+  const { data: acData, loading, error, refetch } = useFetch<any[]>('/aircraft?limit=100');
+  const aircraft: any[] = acData ?? [];
   const filteredAircraft = aircraft.filter(a =>
-    a.registration.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.model.toLowerCase().includes(searchTerm.toLowerCase())
+    (a.model ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleAddAircraft = () => {
     setIsEditMode(false);
     setSelectedAircraft(null);
-    setFormData({ registration: "", model: "", capacity: "", status: "Active" });
+    setSaveError(null);
+    setFormData({ model: "", manufacturer: "", weight_capacity: "", range_km: "", status: "Active" });
     setShowForm(true);
   };
 
   const handleEditAircraft = (ac: any) => {
     setIsEditMode(true);
     setSelectedAircraft(ac);
-    setFormData({
-      registration: ac.registration,
-      model: ac.model,
-      capacity: ac.capacity.toString(),
-      status: ac.status,
-    });
+    setSaveError(null);
+    setFormData({ model: ac.model ?? '', manufacturer: ac.manufacturer ?? '', weight_capacity: String(ac.weight_capacity ?? ''), range_km: String(ac.range_km ?? ''), status: ac.status ?? 'Active' });
     setShowForm(true);
   };
 
@@ -77,29 +74,34 @@ export default function AdminAircraft() {
     setShowDecommissionModal(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (isEditMode) {
-      // Update existing aircraft
-      setAircraft(aircraft.map(a => 
-        a.registration === selectedAircraft.registration
-          ? { ...formData, capacity: parseInt(formData.capacity) }
-          : a
-      ));
-    } else {
-      // Add new aircraft
-      setAircraft([...aircraft, { ...formData, capacity: parseInt(formData.capacity) }]);
+    setSaving(true); setSaveError(null);
+    try {
+      const payload = { model: formData.model, manufacturer: formData.manufacturer, weight_capacity: parseInt(formData.weight_capacity), range_km: parseInt(formData.range_km), status: formData.status };
+      if (isEditMode) {
+        await api.put(`/aircraft/${selectedAircraft.aircraft_id}`, payload);
+      } else {
+        await api.post('/aircraft', payload);
+      }
+      setShowForm(false);
+      refetch();
+    } catch (err: any) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
     }
-    
-    setShowForm(false);
-    setFormData({ registration: "", model: "", capacity: "", status: "Active" });
   };
 
-  const confirmDecommission = () => {
-    setAircraft(aircraft.filter(a => a.registration !== selectedAircraft.registration));
-    setShowDecommissionModal(false);
-    setSelectedAircraft(null);
+  const confirmDecommission = async () => {
+    try {
+      await api.patch(`/aircraft/${selectedAircraft.aircraft_id}/status`, { status: 'Retired' });
+      setSelectedAircraft(null);
+      setShowDecommissionModal(false);
+      refetch();
+    } catch (err: any) {
+      alert(err.message);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -139,7 +141,11 @@ export default function AdminAircraft() {
         </div>
       </div>
 
+      {loading && <LoadingState message="Loading aircraft..." />}
+      {error   && <ErrorState message={error} onRetry={refetch} />}
+
       {/* Aircraft Table */}
+      {!loading && !error && (
       <div className="bg-white shadow-sm overflow-hidden" style={{ borderRadius: "8px" }}>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -163,10 +169,12 @@ export default function AdminAircraft() {
               </tr>
             </thead>
             <tbody>
-              {filteredAircraft.map((ac, index) => (
-                <tr key={ac.registration} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+              {filteredAircraft.length === 0 ? (
+                <tr><td colSpan={5}><EmptyState message="No aircraft found." /></td></tr>
+              ) : filteredAircraft.map((ac, index) => (
+                <tr key={ac.aircraft_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                   <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A", fontWeight: 500 }}>
-                    {ac.registration}
+                    #{ac.aircraft_id}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-600">
                     {ac.model}
@@ -175,7 +183,7 @@ export default function AdminAircraft() {
                     {ac.capacity} seats
                   </td>
                   <td className="px-6 py-4">
-                    <StatusBadge status={ac.status} variant="small" />
+                    <StatusBadge status={ac.status ?? 'Active'} variant="small" />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
@@ -201,6 +209,7 @@ export default function AdminAircraft() {
           </table>
         </div>
       </div>
+      )}
 
       {/* Add/Edit Form Modal */}
       {showForm && (
@@ -213,24 +222,6 @@ export default function AdminAircraft() {
               </h2>
 
               <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label htmlFor="registration" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                    Registration No.
-                  </label>
-                  <input
-                    id="registration"
-                    name="registration"
-                    type="text"
-                    value={formData.registration}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
-                    style={{ borderRadius: "8px" }}
-                    placeholder="e.g., N12345"
-                    required
-                    disabled={isEditMode}
-                  />
-                </div>
-
                 <div>
                   <label htmlFor="model" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
                     Aircraft Model
@@ -249,20 +240,55 @@ export default function AdminAircraft() {
                 </div>
 
                 <div>
-                  <label htmlFor="capacity" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                    Passenger Capacity
+                  <label htmlFor="manufacturer" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                    Manufacturer
                   </label>
                   <input
-                    id="capacity"
-                    name="capacity"
-                    type="number"
-                    value={formData.capacity}
+                    id="manufacturer"
+                    name="manufacturer"
+                    type="text"
+                    value={formData.manufacturer}
                     onChange={handleChange}
                     className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
                     style={{ borderRadius: "8px" }}
-                    placeholder="e.g., 396"
+                    placeholder="e.g., Boeing"
                     required
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="weight_capacity" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                      Weight Capacity (kg)
+                    </label>
+                    <input
+                      id="weight_capacity"
+                      name="weight_capacity"
+                      type="number"
+                      value={formData.weight_capacity}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
+                      style={{ borderRadius: "8px" }}
+                      placeholder="e.g., 100000"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="range_km" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                      Range (km)
+                    </label>
+                    <input
+                      id="range_km"
+                      name="range_km"
+                      type="number"
+                      value={formData.range_km}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
+                      style={{ borderRadius: "8px" }}
+                      placeholder="e.g., 13500"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -278,7 +304,8 @@ export default function AdminAircraft() {
                     style={{ borderRadius: "8px" }}
                   >
                     <option value="Active">Active</option>
-                    <option value="Maintenance">Maintenance</option>
+                    <option value="In_Maintenance">In Maintenance</option>
+                    <option value="Retired">Retired</option>
                   </select>
                 </div>
 
@@ -290,12 +317,14 @@ export default function AdminAircraft() {
                   >
                     Cancel
                   </button>
+                  {saveError && <p className="text-sm mb-2" style={{ color: '#E74C3C' }}>{saveError}</p>}
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 rounded-lg text-white transition-colors hover:opacity-90"
+                    disabled={saving}
+                    className="flex-1 px-4 py-3 rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-50"
                     style={{ backgroundColor: "#2E86DE" }}
                   >
-                    {isEditMode ? "Save Changes" : "Register Aircraft"}
+                    {saving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Register Aircraft'}
                   </button>
                 </div>
               </form>
@@ -317,7 +346,7 @@ export default function AdminAircraft() {
               Decommission Aircraft
             </h2>
             <p className="text-gray-600 text-center mb-6">
-              Are you sure you want to decommission <strong>{selectedAircraft.registration}</strong> ({selectedAircraft.model})? 
+              Are you sure you want to decommission <strong>#{selectedAircraft.aircraft_id}</strong> ({selectedAircraft.model})? 
               This aircraft will be removed from the active fleet.
             </p>
             <div className="flex gap-3">

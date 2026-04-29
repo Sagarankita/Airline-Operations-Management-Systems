@@ -137,8 +137,9 @@ export default function LoginPage() {
             </p>
             <div className="text-xs text-gray-500 space-y-1">
               <p><strong>Test accounts:</strong></p>
-              <p>admin@aoms.com • passenger@aoms.com • crew@aoms.com</p>
-              <p>ground@aoms.com • maintenance@aoms.com • fuel@aoms.com</p>
+              <p>admin@aoms.com • crew@aoms.com • ground@aoms.com</p>
+              <p>maintenance@aoms.com • fuel@aoms.com</p>
+              <p>passenger@aoms.com • passenger2@aoms.com</p>
             </div>
           </div>
         </div>

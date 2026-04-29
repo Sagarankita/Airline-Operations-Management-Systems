@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
+import { LoadingState, ErrorState, EmptyState } from "../../shared/ApiStates";
+import { useFetch } from "../../../../lib/useApi";
 import { Home, Wrench, History, Filter } from "lucide-react";
 
 export default function MaintenanceHistory() {
@@ -16,66 +18,21 @@ export default function MaintenanceHistory() {
     { label: "Maintenance History", path: "/maintenance/history", icon: <History className="w-5 h-5" /> },
   ];
 
-  // Mock maintenance history data
-  const allMaintenanceRecords = [
-    {
-      date: "2026-04-04",
-      aircraft: "N12345",
-      type: "Engine Maintenance",
-      duration: 6.5,
-      parts: "Oil filter, Hydraulic pump",
-      technician: "TECH-001",
-    },
-    {
-      date: "2026-04-02",
-      aircraft: "N12345",
-      type: "Routine Inspection",
-      duration: 3.0,
-      parts: "None",
-      technician: "TECH-003",
-    },
-    {
-      date: "2026-03-28",
-      aircraft: "N67890",
-      type: "Avionics",
-      duration: 4.5,
-      parts: "Navigation display unit",
-      technician: "TECH-002",
-    },
-    {
-      date: "2026-03-25",
-      aircraft: "N12345",
-      type: "Hydraulics",
-      duration: 5.0,
-      parts: "Hydraulic actuator, Pressure sensor",
-      technician: "TECH-001",
-    },
-    {
-      date: "2026-03-20",
-      aircraft: "N24680",
-      type: "Emergency Repair",
-      duration: 8.0,
-      parts: "Landing gear component, Brake assembly",
-      technician: "TECH-004",
-    },
-    {
-      date: "2026-03-15",
-      aircraft: "N67890",
-      type: "Routine Inspection",
-      duration: 2.5,
-      parts: "Air filter",
-      technician: "TECH-003",
-    },
-  ];
+  const { data: acData } = useFetch<any[]>('/aircraft?limit=100');
+  const aircraftList: any[] = acData ?? [];
 
-  // Filter records
-  const filteredRecords = allMaintenanceRecords.filter((record) => {
-    if (selectedAircraft && record.aircraft !== selectedAircraft) return false;
-    if (maintenanceType && record.type !== maintenanceType) return false;
-    if (dateFrom && record.date < dateFrom) return false;
-    if (dateTo && record.date > dateTo) return false;
-    return true;
-  });
+  const query = useMemo(() => {
+    const params = new URLSearchParams();
+    if (selectedAircraft) params.set('aircraft_id', selectedAircraft);
+    if (maintenanceType)  params.set('type', maintenanceType);
+    if (dateFrom)         params.set('from_date', dateFrom);
+    if (dateTo)           params.set('to_date', dateTo);
+    params.set('limit', '100');
+    return `/maintenance?${params.toString()}`;
+  }, [selectedAircraft, maintenanceType, dateFrom, dateTo]);
+
+  const { data, loading, error, refetch } = useFetch<any[]>(query);
+  const filteredRecords: any[] = data ?? [];
 
   const handleReset = () => {
     setSelectedAircraft("");
@@ -105,21 +62,19 @@ export default function MaintenanceHistory() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
-            <label htmlFor="aircraft" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-              Aircraft Registration
+            <label className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+              Aircraft
             </label>
             <select
-              id="aircraft"
               value={selectedAircraft}
               onChange={(e) => setSelectedAircraft(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
               style={{ borderRadius: "8px" }}
             >
               <option value="">All Aircraft</option>
-              <option value="N12345">N12345 - B777-300</option>
-              <option value="N67890">N67890 - A380-800</option>
-              <option value="N24680">N24680 - B787-9</option>
-              <option value="N13579">N13579 - A320-200</option>
+              {aircraftList.map((ac: any) => (
+                <option key={ac.aircraft_id} value={ac.aircraft_id}>{ac.model} (#{ac.aircraft_id})</option>
+              ))}
             </select>
           </div>
 
@@ -131,15 +86,13 @@ export default function MaintenanceHistory() {
               id="maintenanceType"
               value={maintenanceType}
               onChange={(e) => setMaintenanceType(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
               style={{ borderRadius: "8px" }}
             >
               <option value="">All Types</option>
-              <option value="Routine Inspection">Routine Inspection</option>
-              <option value="Engine Maintenance">Engine Maintenance</option>
-              <option value="Hydraulics">Hydraulics</option>
-              <option value="Avionics">Avionics</option>
-              <option value="Emergency Repair">Emergency Repair</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Unscheduled">Unscheduled</option>
+              <option value="Emergency">Emergency</option>
             </select>
           </div>
 
@@ -152,7 +105,7 @@ export default function MaintenanceHistory() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
               style={{ borderRadius: "8px" }}
             />
           </div>
@@ -166,7 +119,7 @@ export default function MaintenanceHistory() {
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none transition-colors"
+              className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
               style={{ borderRadius: "8px" }}
             />
           </div>
@@ -190,66 +143,40 @@ export default function MaintenanceHistory() {
       </div>
 
       {/* Maintenance History Table */}
-      <div className="bg-white shadow-sm overflow-hidden" style={{ borderRadius: "8px" }}>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead style={{ backgroundColor: "#F9FAFB" }}>
-              <tr>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Date
-                </th>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Aircraft
-                </th>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Type
-                </th>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Duration (hrs)
-                </th>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Parts Replaced
-                </th>
-                <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                  Technician
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecords.length > 0 ? (
-                filteredRecords.map((record, index) => (
-                  <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A", fontWeight: 500 }}>
-                      {record.date}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {record.aircraft}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {record.type}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {record.duration}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {record.parts}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {record.technician}
-                    </td>
-                  </tr>
-                ))
-              ) : (
+      {loading && <LoadingState message="Loading maintenance history..." />}
+      {error   && <ErrorState message={error} onRetry={refetch} />}
+      {!loading && !error && (
+        <div className="bg-white shadow-sm overflow-hidden" style={{ borderRadius: "8px" }}>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead style={{ backgroundColor: "#F9FAFB" }}>
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                    No maintenance records found matching the selected filters.
-                  </td>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Date</th>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Aircraft</th>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Type</th>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Title</th>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Remarks</th>
+                  <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>Technician</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredRecords.length === 0 ? (
+                  <tr><td colSpan={6}><EmptyState message="No maintenance records found." /></td></tr>
+                ) : filteredRecords.map((record: any, index: number) => (
+                  <tr key={record.s_no ?? index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    <td className="px-6 py-4 text-sm text-gray-600">{record.date ? new Date(record.date).toLocaleDateString() : '—'}</td>
+                    <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A", fontWeight: 500 }}>{record.aircraft_model ?? `#${record.aircraft_id}`}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{record.maintenance_type}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{record.title ?? '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{record.remark ?? '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{record.staff_name ?? `#${record.emp_id}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </DashboardLayout>
   );
 }

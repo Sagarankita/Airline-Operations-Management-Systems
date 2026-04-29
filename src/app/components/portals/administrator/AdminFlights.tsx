@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "../../layouts/DashboardLayout";
 import { Breadcrumb } from "../../shared/Breadcrumb";
 import { StatusBadge } from "../../shared/StatusBadge";
+import { LoadingState, ErrorState, EmptyState } from "../../shared/ApiStates";
+import { api } from "../../../../lib/api";
+import { useFetch } from "../../../../lib/useApi";
 import {
   Home,
   Users,
@@ -24,14 +27,14 @@ export default function AdminFlights() {
   const [showFlightForm, setShowFlightForm] = useState(false);
   const [selectedFlight, setSelectedFlight] = useState<any>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
-    flightNo: "",
-    origin: "",
-    destination: "",
-    departure: "",
-    arrival: "",
-    aircraft: "",
-    status: "Active",
+    source_airport_code: "",
+    dest_airport_code: "",
+    departure_time: "",
+    arrival_time: "",
+    aircraft_id: "",
   });
 
   const navItems = [
@@ -44,64 +47,30 @@ export default function AdminFlights() {
     { label: "Reports", path: "/admin/reports", icon: <FileText className="w-5 h-5" /> },
   ];
 
-  const [flights, setFlights] = useState([
-    {
-      flightNo: "AO101",
-      origin: "JFK",
-      destination: "LHR",
-      departure: "2026-04-06 08:00",
-      arrival: "2026-04-06 20:15",
-      aircraft: "B777-300",
-      status: "Active",
-    },
-    {
-      flightNo: "AO202",
-      origin: "LHR",
-      destination: "CDG",
-      departure: "2026-04-06 14:30",
-      arrival: "2026-04-06 16:45",
-      aircraft: "A320-200",
-      status: "Delayed",
-    },
-    {
-      flightNo: "AO303",
-      origin: "CDG",
-      destination: "DXB",
-      departure: "2026-04-07 10:00",
-      arrival: "2026-04-07 19:30",
-      aircraft: "A380-800",
-      status: "Active",
-    },
-    {
-      flightNo: "AO404",
-      origin: "DXB",
-      destination: "SIN",
-      departure: "2026-04-07 22:00",
-      arrival: "2026-04-08 08:15",
-      aircraft: "B787-9",
-      status: "Pending",
-    },
-  ]);
+  const { data: flightsData, loading, error, refetch } = useFetch<any[]>('/flights?limit=50');
+  const { data: aircraftData } = useFetch<any[]>('/aircraft?limit=100');
+  const flights: any[] = flightsData ?? [];
+  const aircraftList: any[] = aircraftData ?? [];
 
   const handleAddFlight = () => {
     setIsEditMode(false);
     setSelectedFlight(null);
-    setFormData({
-      flightNo: "",
-      origin: "",
-      destination: "",
-      departure: "",
-      arrival: "",
-      aircraft: "",
-      status: "Active",
-    });
+    setSaveError(null);
+    setFormData({ source_airport_code: "", dest_airport_code: "", departure_time: "", arrival_time: "", aircraft_id: "" });
     setShowFlightForm(true);
   };
 
   const handleEditFlight = (flight: any) => {
     setIsEditMode(true);
     setSelectedFlight(flight);
-    setFormData({ ...flight });
+    setSaveError(null);
+    setFormData({
+      source_airport_code: flight.source_airport_code,
+      dest_airport_code:   flight.dest_airport_code,
+      departure_time:      flight.departure_time?.replace('Z','').slice(0,16),
+      arrival_time:        flight.arrival_time?.replace('Z','').slice(0,16),
+      aircraft_id:         String(flight.aircraft_id),
+    });
     setShowFlightForm(true);
   };
 
@@ -110,29 +79,39 @@ export default function AdminFlights() {
     setShowCancelModal(true);
   };
 
-  const handleSubmitFlight = (e: React.FormEvent) => {
+  const handleSubmitFlight = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (isEditMode) {
-      // Update existing flight
-      setFlights(flights.map(f => 
-        f.flightNo === selectedFlight.flightNo ? formData : f
-      ));
-    } else {
-      // Add new flight
-      setFlights([...flights, formData]);
+    setSaving(true); setSaveError(null);
+    try {
+      const payload = {
+        source_airport_code: formData.source_airport_code.toUpperCase(),
+        dest_airport_code:   formData.dest_airport_code.toUpperCase(),
+        departure_time:      formData.departure_time,
+        arrival_time:        formData.arrival_time,
+        aircraft_id:         Number(formData.aircraft_id),
+      };
+      if (isEditMode) {
+        await api.put(`/flights/${selectedFlight.flight_id}`, payload);
+      } else {
+        await api.post('/flights', payload);
+      }
+      setShowFlightForm(false);
+      refetch();
+    } catch (err: any) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
     }
-    
-    setShowFlightForm(false);
   };
 
-  const confirmCancelFlight = () => {
-    setFlights(flights.map(f =>
-      f.flightNo === selectedFlight.flightNo
-        ? { ...f, status: "Cancelled" }
-        : f
-    ));
-    setShowCancelModal(false);
+  const confirmCancelFlight = async () => {
+    try {
+      await api.patch(`/flights/${selectedFlight.flight_id}/status`, { status: 'Cancelled' });
+      setShowCancelModal(false);
+      refetch();
+    } catch (err: any) {
+      alert(err.message);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -185,13 +164,15 @@ export default function AdminFlights() {
       </div>
 
       {viewMode === "list" ? (
+        loading ? <LoadingState message="Loading flights..." /> :
+        error   ? <ErrorState message={error} onRetry={refetch} /> :
         <div className="bg-white shadow-sm overflow-hidden" style={{ borderRadius: "8px" }}>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead style={{ backgroundColor: "#F9FAFB" }}>
                 <tr>
                   <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
-                    Flight No.
+                    Flight ID
                   </th>
                   <th className="px-6 py-4 text-left text-sm" style={{ color: "#1B2A4A", fontWeight: 600 }}>
                     Origin
@@ -217,28 +198,30 @@ export default function AdminFlights() {
                 </tr>
               </thead>
               <tbody>
-                {flights.map((flight, index) => (
-                  <tr key={flight.flightNo} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                {flights.length === 0 ? (
+                  <tr><td colSpan={8}><EmptyState message="No flights found." /></td></tr>
+                ) : flights.map((flight, index) => (
+                  <tr key={flight.flight_id} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="px-6 py-4 text-sm" style={{ color: "#1B2A4A", fontWeight: 500 }}>
-                      {flight.flightNo}
+                      #{flight.flight_id}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {flight.origin}
+                      {flight.source_airport_code}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {flight.destination}
+                      {flight.dest_airport_code}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {flight.departure}
+                      {flight.departure_time ? new Date(flight.departure_time).toLocaleString() : '—'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {flight.arrival}
+                      {flight.arrival_time ? new Date(flight.arrival_time).toLocaleString() : '—'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {flight.aircraft}
+                      {flight.aircraft_model ?? flight.aircraft_id}
                     </td>
                     <td className="px-6 py-4">
-                      <StatusBadge status={flight.status} variant="small" />
+                      <StatusBadge status={flight.schedule_status ?? 'Scheduled'} variant="small" />
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
@@ -336,59 +319,40 @@ export default function AdminFlights() {
               <h2 className="text-2xl mb-6" style={{ color: "#1B2A4A", fontWeight: 600 }}>
                 {isEditMode ? "Edit Flight" : "Add Flight"}
               </h2>
-
               <form onSubmit={handleSubmitFlight} className="space-y-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div>
-                    <label htmlFor="flightNo" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                      Flight Number
-                    </label>
-                    <input
-                      id="flightNo"
-                      name="flightNo"
-                      type="text"
-                      value={formData.flightNo}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
-                      style={{ borderRadius: "8px" }}
-                      placeholder="e.g., AO101"
-                      required
-                      disabled={isEditMode}
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="aircraft" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                      Aircraft
-                    </label>
-                    <select
-                      id="aircraft"
-                      name="aircraft"
-                      value={formData.aircraft}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
-                      style={{ borderRadius: "8px" }}
-                      required
-                    >
-                      <option value="">Select aircraft...</option>
-                      <option value="B777-300">Boeing 777-300</option>
-                      <option value="A380-800">Airbus A380-800</option>
-                      <option value="B787-9">Boeing 787-9</option>
-                      <option value="A320-200">Airbus A320-200</option>
-                    </select>
-                  </div>
+                <div>
+                  <label htmlFor="aircraft_id" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                    Aircraft
+                  </label>
+                  <select
+                    id="aircraft_id"
+                    name="aircraft_id"
+                    value={formData.aircraft_id}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
+                    style={{ borderRadius: "8px" }}
+                    required
+                  >
+                    <option value="">Select aircraft...</option>
+                    {aircraftList.map((ac: any) => (
+                      <option key={ac.aircraft_id} value={ac.aircraft_id}>
+                        {ac.model} ({ac.status})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
-                    <label htmlFor="origin" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                    <label htmlFor="source_airport_code" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
                       Origin (Airport Code)
                     </label>
                     <input
-                      id="origin"
-                      name="origin"
+                      id="source_airport_code"
+                      name="source_airport_code"
                       type="text"
-                      value={formData.origin}
+                      maxLength={3}
+                      value={formData.source_airport_code}
                       onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
                       style={{ borderRadius: "8px" }}
@@ -396,16 +360,16 @@ export default function AdminFlights() {
                       required
                     />
                   </div>
-
                   <div>
-                    <label htmlFor="destination" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                    <label htmlFor="dest_airport_code" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
                       Destination (Airport Code)
                     </label>
                     <input
-                      id="destination"
-                      name="destination"
+                      id="dest_airport_code"
+                      name="dest_airport_code"
                       type="text"
-                      value={formData.destination}
+                      maxLength={3}
+                      value={formData.dest_airport_code}
                       onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
                       style={{ borderRadius: "8px" }}
@@ -417,31 +381,30 @@ export default function AdminFlights() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div>
-                    <label htmlFor="departure" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                      Departure Date & Time
+                    <label htmlFor="departure_time" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                      Departure Date &amp; Time
                     </label>
                     <input
-                      id="departure"
-                      name="departure"
+                      id="departure_time"
+                      name="departure_time"
                       type="datetime-local"
-                      value={formData.departure.replace(" ", "T")}
-                      onChange={(e) => setFormData({ ...formData, departure: e.target.value.replace("T", " ") })}
+                      value={formData.departure_time}
+                      onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
                       style={{ borderRadius: "8px" }}
                       required
                     />
                   </div>
-
                   <div>
-                    <label htmlFor="arrival" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                      Arrival Date & Time
+                    <label htmlFor="arrival_time" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
+                      Arrival Date &amp; Time
                     </label>
                     <input
-                      id="arrival"
-                      name="arrival"
+                      id="arrival_time"
+                      name="arrival_time"
                       type="datetime-local"
-                      value={formData.arrival.replace(" ", "T")}
-                      onChange={(e) => setFormData({ ...formData, arrival: e.target.value.replace("T", " ") })}
+                      value={formData.arrival_time}
+                      onChange={handleChange}
                       className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
                       style={{ borderRadius: "8px" }}
                       required
@@ -449,24 +412,7 @@ export default function AdminFlights() {
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor="status" className="block text-sm mb-2" style={{ color: "#1B2A4A" }}>
-                    Status
-                  </label>
-                  <select
-                    id="status"
-                    name="status"
-                    value={formData.status}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 focus:border-[#2E86DE] focus:outline-none"
-                    style={{ borderRadius: "8px" }}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Delayed">Delayed</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
-                </div>
+                {saveError && <p className="text-sm" style={{ color: '#E74C3C' }}>{saveError}</p>}
 
                 <div className="flex gap-3 pt-4">
                   <button
@@ -478,10 +424,11 @@ export default function AdminFlights() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 px-4 py-3 rounded-lg text-white transition-colors hover:opacity-90"
+                    disabled={saving}
+                    className="flex-1 px-4 py-3 rounded-lg text-white transition-colors hover:opacity-90 disabled:opacity-50"
                     style={{ backgroundColor: "#2E86DE" }}
                   >
-                    {isEditMode ? "Save Changes" : "Add Flight"}
+                    {saving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Add Flight'}
                   </button>
                 </div>
               </form>
